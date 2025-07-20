@@ -321,6 +321,9 @@
     let variables = {};
     const WOLFRAM_APPID = '23KKQ9JWEG';  // Put your Wolfram Alpha AppID here
 
+    // OpenAI API key for fallback (put your key here)
+    const OPENAI_API_KEY = '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'; // <-- Add your OpenAI API key here
+
     function appendMessage(message, sender = 'bot', isError = false) {
       const msg = document.createElement('div');
       msg.className = `msg ${sender}` + (isError ? ' error' : '');
@@ -337,34 +340,28 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
+    // Improved preprocess for better natural math language understanding
     function preprocess(input) {
       let text = input.toLowerCase();
-      const phrasesToRemove = [
-        /\bwhat(?:'s| is)?\b/g,
-        /\bwhats\b/g,
-        /\bthe answer (to|of|for)\b/g,
-        /\bplease\b/g,
-        /\bcalculate\b/g,
-        /\bsolve\b/g,
-        /\bfind\b/g,
-        /\banswer\b/g,
-        /\bthen\b/g,
-        /\bif\b/g,
-      ];
-      phrasesToRemove.forEach(pattern => text = text.replace(pattern, ''));
+
       text = text
+        .replace(/what(?:'s| is)?/g, '')
+        .replace(/(the )?answer (to|of|for)/g, '')
+        .replace(/please|calculate|solve|find|answer|then|if|equals|is|of/g, '')
         .replace(/plus/g, '+')
         .replace(/minus/g, '-')
-        .replace(/times|multiplied by| x /g, '*')
-        .replace(/divided by| over /g, '/')
+        .replace(/times|multiplied by|×| x /g, '*')
+        .replace(/divided by|÷| over /g, '/')
         .replace(/to the power of|raised to( the)? power of|power of/g, '^')
-        .replace(/\bequals\b|=|\bis\b/g, '=')
         .replace(/percent/g, '%')
         .replace(/(\d+)\s*%/g, '($1/100)')
         .replace(/(\d)\s*x\s*(\d)/g, '$1*$2')
-        .replace(/[^0-9a-z+\-*/=^%.()]/g, '')
+        .replace(/\b(pi)\b/g, 'PI')
+        .replace(/\be\b/g, 'e')
+        .replace(/[^0-9a-z+\-*/=^%.()]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+
       return text;
     }
 
@@ -403,6 +400,40 @@
       }
     }
 
+    async function queryOpenAIChat(prompt) {
+      if (!OPENAI_API_KEY) return null; // Skip if no API key
+
+      try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: 'You are a helpful math assistant. Answer math questions precisely and clearly.' },
+              { role: 'user', content: prompt }
+            ],
+            max_tokens: 500,
+            temperature: 0.3,
+          }),
+        });
+
+        if (!response.ok) throw new Error('OpenAI API error');
+
+        const data = await response.json();
+        if (data.choices && data.choices.length > 0) {
+          return data.choices[0].message.content.trim();
+        }
+        return null;
+
+      } catch {
+        return null;
+      }
+    }
+
     async function processQuery(query) {
       appendMessage(query, 'user');
 
@@ -411,28 +442,33 @@
         return;
       }
 
-      // Always Math mode now
       const processed = preprocess(query);
+
+      // Try mathjs evaluation
       try {
-        // Try mathjs first
         const evalResult = math.evaluate(processed, variables);
         if (evalResult !== undefined) {
-          variables = {...variables, ans: evalResult};
+          variables = { ...variables, ans: evalResult };
           appendMessage(String(evalResult), 'bot');
           return;
         }
-      } catch {
-        // fallthrough to WolframAlpha query
-      }
+      } catch {}
 
-      // Try WolframAlpha with rich pods
+      // Try WolframAlpha API
       const wolframResult = await queryWolframAlphaFull(query);
       if (wolframResult) {
         appendHTMLMessage(wolframResult, 'bot');
         return;
       }
 
-      appendMessage("Sorry i cant understand", 'bot', true);
+      // Try OpenAI fallback
+      const openAIResult = await queryOpenAIChat(query);
+      if (openAIResult) {
+        appendMessage(openAIResult, 'bot');
+        return;
+      }
+
+      appendMessage("Sorry, I can't understand or solve that.", 'bot', true);
     }
 
     chatForm.addEventListener('submit', async e => {
@@ -504,7 +540,7 @@
     });
     updateThemeUI();
 
-    // PARTICLES
+    // PARTICLES BACKGROUND
     const canvas = document.getElementById('particles');
     const ctx = canvas.getContext('2d');
     let particles = [];
@@ -517,7 +553,6 @@
       constructor() {
         this.reset();
       }
-
       reset() {
         this.x = random(0, window.innerWidth);
         this.y = random(window.innerHeight, window.innerHeight + 100);
@@ -527,7 +562,6 @@
         this.opacity = random(0.1, 0.4);
         this.color = '#FF8C66';
       }
-
       update() {
         this.y -= this.speedY;
         this.x += this.speedX;
@@ -536,11 +570,9 @@
           this.y = window.innerHeight + this.size;
         }
       }
-
       draw() {
         ctx.beginPath();
         ctx.fillStyle = `rgba(255, 140, 102, ${this.opacity})`;
-        // Adjust shadow/glow depending on theme for better visibility
         if (document.body.classList.contains('light-mode')) {
           ctx.shadowColor = 'rgba(255, 140, 102, 0.7)';
           ctx.shadowBlur = 10;
@@ -550,7 +582,7 @@
         }
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
         ctx.fill();
-        ctx.shadowBlur = 0; // reset
+        ctx.shadowBlur = 0;
       }
     }
 
@@ -582,7 +614,6 @@
     resizeCanvas();
     initParticles();
     animateParticles();
-
   </script>
 </body>
 </html>
